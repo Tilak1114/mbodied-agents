@@ -181,10 +181,10 @@ class RT1Agent(MotorAgent):
         image = cv2.resize(np.array(image, dtype=np.uint8), (224, 224))
         self.image_history.append(torch.tensor(
             image / 255.0, dtype=torch.float32, device=self.device).permute(1, 0, 2))
-        if len(self.image_history) > 6:
+        if len(self.image_history) > IMAGE_HISTORY_BUFFER_SIZE:
             self.image_history.pop(0)
-        elif len(self.image_history) < 6:
-            for _ in range(6 - len(self.image_history)):
+        elif len(self.image_history) < IMAGE_HISTORY_BUFFER_SIZE:
+            for _ in range(IMAGE_HISTORY_BUFFER_SIZE - len(self.image_history)):
                 self.image_history.append(
                     torch.tensor(image / 255.0, dtype=torch.float32,
                                  device=self.device).permute(1, 0, 2),

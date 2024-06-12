@@ -13,7 +13,7 @@
 # limitations under the License.
 
 import torch
-from mbodied_agents.agents.motor.rt1.rt1_agent import RT1Agent
+from mbodied_agents.agents.motion.rt1.rt1_agent import RT1Agent
 
 
 def main() -> None:
@@ -31,7 +31,7 @@ def main() -> None:
     rt1_agent = RT1Agent(rt1_agent_config)
 
     # Create dummy input data
-    image = torch.rand(224, 224, 3)  # Assume this is an example image input
+    image = torch.randint(0, 256, (224, 224, 3), dtype=torch.uint8).numpy()
     instruction = 'Pick the banana peel'
 
     # Use the act method of RT1Agent to get actions

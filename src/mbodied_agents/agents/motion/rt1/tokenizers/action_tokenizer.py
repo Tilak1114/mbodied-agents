@@ -18,9 +18,8 @@
 # You can find the original code from here[https://github.com/google-research/robotics_transformer].
 
 
-from typing import Dict, Union
+from typing import Dict
 
-import numpy as np
 import torch
 from gym import spaces
 
@@ -72,12 +71,13 @@ class RT1ActionTokenizer:
     def __init__(self,
                  action_space: spaces.Dict,
                  vocab_size: int = 256,
-                 device: Union[str, torch.device] = None):
+                 device: str | torch.device = None):
         """Instantiates an RT1ActionTokenizer.
 
         Args:
         action_space: A dictionary of OpenAI gym spaces of the expected actions.
         vocab_size: Number of buckets to discretize action to.
+        device: Torch device
         """
         self.device = device
         self._action_space = action_space

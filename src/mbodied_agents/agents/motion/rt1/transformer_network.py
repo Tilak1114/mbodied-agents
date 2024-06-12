@@ -20,7 +20,7 @@
 
 # Copied and updated with significant changes from https://github.com/maruya24/pytorch_robotics_transformer
 
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Tuple, Union
 
 import numpy as np
 import torch
@@ -39,12 +39,12 @@ class TransformerNetwork(nn.Module):
         self,
         observation_space: spaces.Dict,
         action_space: spaces.Dict, 
-        image_keys: List[str] = ['image_primary'],
+        image_keys: List[str] = None,
         context_key: str = 'natural_language_embedding',
         vocab_size: int = 256, # Token dimension.
         num_heads: int = 8,
         image_tokens_size: int = 8,
-        token_embedding_dim: int = 512, # Embedded token dwimension.
+        token_embedding_dim: int = 512, # Embedded token dimension.
         num_layers: int = 1,
         layer_size: int = 4096,  # Attention key_dim which is the size of each attention head for query, key and values.
         dropout_rate: float = 0.1,
@@ -53,6 +53,8 @@ class TransformerNetwork(nn.Module):
         future_prediction_length: int = 1, # Must be <= observation_history_length.
         causal_attention: bool = True,
     ):
+        if image_keys is None:
+            image_keys = ['image_primary']
         super().__init__()
         
         self.observation_space = observation_space
@@ -68,6 +70,7 @@ class TransformerNetwork(nn.Module):
         self.image_tokens_size = image_tokens_size
 
         self.loss_object = nn.CrossEntropyLoss(reduction="none")
+
         self.image_tokenizers = nn.ModuleDict({
             key:  RT1ImageTokenizer(
                 embedding_output_dim=token_embedding_dim,
@@ -80,6 +83,7 @@ class TransformerNetwork(nn.Module):
         self.action_tokenizer = RT1ActionTokenizer(
             action_space, vocab_size=self.vocab_size,
         )
+
         self.transformer = Transformer(
             num_layers=num_layers,
             layer_size=layer_size,
@@ -87,7 +91,7 @@ class TransformerNetwork(nn.Module):
             feed_forward_size= token_embedding_dim,
             dropout_rate=dropout_rate,
             vocab_size=vocab_size,
-            input_token_emb_dim=token_embedding_dim
+            input_token_emb_dim=token_embedding_dim,
         )
 
         # Get the number of tokens
@@ -114,27 +118,23 @@ class TransformerNetwork(nn.Module):
                     ),
                     dtype=np.float32,
                 ),
-                # "context_pos_orn": spaces.Box(
-                #     low=-np.inf,
-                #     high=np.inf,
-                #     shape=(observation_history_length, self.tokens_per_context_image),
-                #     dtype=np.float32,
-                # ),
+
                 "action_tokens": spaces.MultiDiscrete(
-                    np.full((observation_history_length, self.tokens_per_action), vocab_size)
+                    np.full((observation_history_length, self.tokens_per_action), vocab_size),
                 ),
+
                 # Stores where in the window we are.
                 # This value is within range [0, observation_history_length + 1].
                 # When seq_idx == observation_history_length, context_image_tokens and
                 # action_tokens need to be shifted to the left.
-                "seq_idx": spaces.Discrete(observation_history_length + 1)
+                "seq_idx": spaces.Discrete(observation_history_length + 1),
                 # Our data is like context_image_tokens + action_tokens + context_image_tokens + action_tokens + context_image_tokens ...
                 # 1 time step means [context_image_tokens + action_tokens]
                 # seq_idx means which time steps we are. But it is adjusted to observation_history_length when it exceeds observation_history_length.
-            }
+            },
         )
 
-    def get_action_index_for_token(self, k):
+    def get_action_index_for_token(self, k) -> int:
         """Returns action associated with the token at given position `k`.
 
         If k is not an action token then it returns -1.
@@ -156,18 +156,18 @@ class TransformerNetwork(nn.Module):
         ):  # check whether k is context_image token
             return -1
         return int(
-            n / self.single_time_step_num_tokens
+            n / self.single_time_step_num_tokens,
         )  # return which time index that k belongs to.
 
     # _action_tokens_mask is for loss computing. This has all indexes of action tokens in all tokens.
     # We can know which output tokens are action predictions by _action_tokens_mask - 1.
     # _default_attention_mask is modified causaul mask because we will only use observations tokens when predicting actions.
     # So we also have to mask action tokens.
-    def generate_masks(self):
+    def generate_masks(self) -> np.ndarray:
         """Generate mask for action prediction loss and attention visualization."""
         # each time step = [image, action]
         self.single_time_step_num_tokens = (
-            self.tokens_per_action + self.tokens_per_context_image
+            self.tokens_per_context_image + self.tokens_per_action
         )
 
         # full sequence = [prefix context + N x timestep + postfix context]
@@ -188,11 +188,10 @@ class TransformerNetwork(nn.Module):
             # This is a lower triangular matrix. All elements other than 0 are 1.
             # 0 means mask.
             default_attention_mask = np.tril(
-                default_attention_mask
+                default_attention_mask,
             )
 
         action_mask = np.ndarray(shape=(self.all_num_tokens, self.all_num_tokens), dtype=int)
-
 
         for i in range(self.all_num_tokens):
             for j in range(self.all_num_tokens):
@@ -217,16 +216,16 @@ class TransformerNetwork(nn.Module):
         self,
         observations: Dict[str, torch.Tensor],
         network_state: Dict[str, torch.Tensor],
-        action_readout_tokens: Optional[torch.Tensor] = None,
-    ):
+        action_readout_tokens: torch.Tensor | None,
+    ) -> tuple:
         """Calls the transformer network.
 
         Args:
             observations: Observation data including image and natural language
                 embedding in dict of Tensors.
-        network_state: Only used for inference. Network state data including time seq idx, image tokens, action
-            tokens.
-        action_readout_tokens: Optional readout tokens to pass in. Input tokens will be zero otherwise
+            network_state: Only used for inference. Network state data including time seq idx, image tokens, action
+                tokens.
+            action_readout_tokens: Optional readout tokens to pass in. Input tokens will be zero otherwise.
 
         Returns:
             A tuple `(Detokenized output actions, network state)`.
@@ -242,8 +241,9 @@ class TransformerNetwork(nn.Module):
 
             # context_image_tokens: (b, t, num_tokens, embedding_dim)
             # action_tokens: (b, t, self.tokens_per_action)
+            
         context_image_tokens, previous_action_tokens, attention_mask = self.get_tokens_and_mask(
-            observations, network_state
+            observations, network_state,
         )
         if action_readout_tokens is None:
             action_readout_tokens = torch.zeros(
@@ -255,7 +255,7 @@ class TransformerNetwork(nn.Module):
             # run transformer in loop to produce action tokens one-by-one
             seq_idx = network_state["seq_idx"][0]
             action_t = torch.minimum(
-                seq_idx, torch.tensor(self.observation_history_length - 1)
+                seq_idx, torch.tensor(self.observation_history_length - 1),
             )
             # Transformer shifts all to the left by one step by default (it's usually
             # predicting the next token as default training task...).
@@ -287,7 +287,7 @@ class TransformerNetwork(nn.Module):
 
                 # Add the predicted token to previous_action_tokens.
                 previous_action_tokens = previous_action_tokens.view(
-                    b, -1
+                    b, -1,
                 )  # [b, t, self.tokens_per_action] -> [b, t * self.tokens_per_action]
                 action_start_index = (action_t * self.tokens_per_action) + k
                 # replace action_tokens[:, action_start_index] with the predicted token. Note that this is not insert.
@@ -308,16 +308,16 @@ class TransformerNetwork(nn.Module):
                     # action_predictions_logits is
                     # [1, self.tokens_per_action, self.vocab_size]
                     "action_predictions_logits": torch.concat(
-                        action_predictions_logits, 1
-                    )
-                }
+                        action_predictions_logits, 1,
+                    ),
+                },
             )
 
             predicted_tokens_for_output = torch.concat(
-                current_action_tokens, 1
+                current_action_tokens, 1,
             )  # [1, self.tokens_per_action]
             one_state_action_tokens = predicted_tokens_for_output.unsqueeze(
-                1
+                1,
             )  # [1, 1, self.tokens_per_action]
 
             # Add predicted action tokens  to network_state['action_tokens']
