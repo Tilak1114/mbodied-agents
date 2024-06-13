@@ -21,9 +21,9 @@ import torch
 from einops import rearrange, repeat
 from gym import spaces
 from mbodied_agents.agents.motion.motor_agent import MotorAgent
-from mbodied_agents.agents.motion.rt1.tokenizers.action_tokenizer import RT1ActionTokenizer
-from mbodied_agents.agents.motion.rt1.tokenizers.utils import batched_space_sampler, np_to_tensor
-from mbodied_agents.agents.motion.rt1.transformer_network import TransformerNetwork
+from mbodied_agents.agents.motion.vit_rt.tokenizers.action_tokenizer import RT1ActionTokenizer
+from mbodied_agents.agents.motion.vit_rt.tokenizers.utils import batched_space_sampler, np_to_tensor
+from mbodied_agents.agents.motion.vit_rt.transformer_network import TransformerNetwork
 from mbodied_agents.base.motion import Motion
 from mbodied_agents.types.controls import HandControl, JointControl, Pose
 from mbodied_agents.types.vision import SupportsImage
@@ -59,7 +59,7 @@ IMAGE_HISTORY_BUFFER_SIZE = 6
 IMAGE_SIZE = (224, 224, 3)
 
 
-class RT1Agent(MotorAgent):
+class ViTRTAgent(MotorAgent):
     """RT1Agent class responsible for interacting with the environment based on the agent's policy.
 
     This agent uses a TransformerNetwork to generate actions based on the given observations
@@ -75,7 +75,7 @@ class RT1Agent(MotorAgent):
         step_num (int): Keeps track of the number of steps taken by the agent.
     """
 
-    def __init__(self, config, weights_path: str = None, **kwargs) -> None:
+    def __init__(self, config, **kwargs) -> None:
         """Initializes the RT1Agent with the provided configuration and model weights.
 
         Args:
@@ -125,20 +125,6 @@ class RT1Agent(MotorAgent):
             action_space=action_space,
         )
 
-        if weights_path:
-            self.model.load_state_dict(torch.load(
-                weights_path, map_location=self.device))
-
-        self.image_history = []
-        history_size = self.config.get(
-            'history_size', IMAGE_HISTORY_BUFFER_SIZE)
-        image_size = self.config.get('image_size', IMAGE_SIZE)
-        for _i in range(history_size):
-            self.image_history.append(torch.zeros(
-                size=image_size, dtype=torch.float, device=self.device))
-
-        self.step_num: int = 0
-
     def get_text_embedding(self, text):
 
         # Tokenize the input text
@@ -156,40 +142,9 @@ class RT1Agent(MotorAgent):
 
     def act(self,
             instruction: str,
-            image: SupportsImage,
+            image_seq: List[SupportsImage],
             ) -> List[Motion]:
-        """Generate a sequence of actions based on the provided instruction embedding and image.
-
-        This method processes the image, maintains image history, constructs observations, and generates actions
-        using the model. The actions include the hand's pose and grasp control.
-
-        Args:
-            instruction (string): A string representing an instruction.
-            image (SupportsImage): An image used to inform the action decision.
-
-        Returns:
-            List[Motion]: A list of generated motions, each containing pose and grasp control.
-
-        Example:
-            >>> instruction = "Pick up the apple"
-            >>> image = np.random.randint(0, 255, (224, 224, 3), dtype=np.uint8)
-            >>> agent = RT1Agent(config={'observation_history_size': 6, 'future_prediction': 6, 'token_embedding_dim': 768, 'causal_attention': True, 'num_layers': 6, 'layer_size': 512})
-            >>> actions = agent.act(instruction, image)
-            >>> all(isinstance(action, HandControl) for action in actions)
-            True
-        """
-        image = cv2.resize(np.array(image, dtype=np.uint8), (224, 224))
-        self.image_history.append(torch.tensor(
-            image / 255.0, dtype=torch.float32, device=self.device).permute(1, 0, 2))
-        if len(self.image_history) > 6:
-            self.image_history.pop(0)
-        elif len(self.image_history) < 6:
-            for _ in range(6 - len(self.image_history)):
-                self.image_history.append(
-                    torch.tensor(image / 255.0, dtype=torch.float32,
-                                 device=self.device).permute(1, 0, 2),
-                )
-
+        
         images = torch.stack(self.image_history)[None]
 
         video = rearrange(images.to(self.device), "b f h w c -> b f c h w")

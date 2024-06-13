@@ -216,7 +216,7 @@ class TransformerNetwork(nn.Module):
         self,
         observations: Dict[str, torch.Tensor],
         network_state: Dict[str, torch.Tensor],
-        action_readout_tokens: torch.Tensor | None,
+        action_readout_tokens: torch.Tensor = None,
     ) -> tuple:
         """Calls the transformer network.
 
